@@ -1,0 +1,9 @@
+.git
+.venv
+.env
+dados/
+tests/
+.pytest_cache
+**/__pycache__
+*.md
+!negocio/*.md

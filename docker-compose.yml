@@ -1,0 +1,46 @@
+# Ambiente local completo: n8n (orquestrador) + API do agente (cérebro).
+#
+#   docker compose up -d --build
+#   n8n:  http://localhost:5678      API: http://localhost:8000/docs
+#
+# Dentro da rede do compose, o n8n chama a API por http://api:8000 (nome do serviço).
+# As portas ficam presas em 127.0.0.1: nada fica exposto na rede local. Para o
+# Telegram alcançar o webhook do n8n, usamos um túnel (cloudflared) apontando para :5678.
+
+name: ia-agent
+
+services:
+  api:
+    build: .
+    env_file: .env                       # LLM_PROVEDOR, LLM_MODELO, OPENAI_*, API_TOKEN
+    environment:
+      BANCO_CAMINHO: /app/dados/atendimento.db
+    volumes:
+      - api_dados:/app/dados             # SQLite sobrevive a rebuilds do container
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.47.3   # versão fixa: workflows exportados dependem dela
+    environment:
+      GENERIC_TIMEZONE: America/Sao_Paulo   # fuso dos Schedule Triggers (lembrete 18h)
+      TZ: America/Sao_Paulo
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      # URL pública que o n8n informa ao Telegram ao registrar o webhook.
+      # Vem do .env (interpolação do compose); no dia 2 vira a URL do cloudflared.
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n         # workflows, credenciais e chave de criptografia
+    ports:
+      - "127.0.0.1:5678:5678"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  api_dados:
+  n8n_data:

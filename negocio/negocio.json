@@ -1,0 +1,23 @@
+{
+  "nome": "Studio Bella",
+  "tipo": "salão de beleza",
+  "endereco": "Rua das Flores, 123 - Centro, Belo Horizonte/MG",
+  "intervalo_agenda_min": 30,
+  "horario_funcionamento": {
+    "segunda": null,
+    "terca": ["09:00", "19:00"],
+    "quarta": ["09:00", "19:00"],
+    "quinta": ["09:00", "19:00"],
+    "sexta": ["09:00", "20:00"],
+    "sabado": ["08:00", "16:00"],
+    "domingo": null
+  },
+  "servicos": [
+    {"nome": "Corte feminino", "duracao_min": 60, "preco": 90.0},
+    {"nome": "Corte masculino", "duracao_min": 30, "preco": 50.0},
+    {"nome": "Escova", "duracao_min": 45, "preco": 60.0},
+    {"nome": "Coloração", "duracao_min": 120, "preco": 180.0},
+    {"nome": "Manicure", "duracao_min": 45, "preco": 40.0},
+    {"nome": "Pedicure", "duracao_min": 45, "preco": 45.0}
+  ]
+}

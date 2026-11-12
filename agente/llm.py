@@ -6,18 +6,34 @@ converte para o formato da sua API. Assim dá para trocar de modelo mudando o .e
 Formato neutro das mensagens:
   {"role": "user",      "content": "texto"}
   {"role": "assistant", "content": "texto ou None", "tool_calls": [{"id", "nome", "argumentos", "extra"}]}
+  {"role": "tool",      "tool_call_id": "...", "nome": "...", "content": "resultado"}
 
 `extra` guarda campos próprios do provedor que precisam voltar intactos no turno
 seguinte. Ex.: o Gemini 3 exige a `thought_signature` de cada tool call; sem ela, 400.
-  {"role": "tool",      "tool_call_id": "...", "nome": "...", "content": "resultado"}
 """
 
 import json
+import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 
 from .tools import Tool
+
+log = logging.getLogger("llm")
+
+# Erros em que vale tentar outro modelo: sobrecarga, limite de cota, falha do servidor.
+# 400/401/404 NÃO entram: são erro nosso (requisição/config), e trocar de modelo esconderia o bug.
+STATUS_TRANSITORIOS = {408, 429, 500, 502, 503, 504}
+QUARENTENA_S = 120
+
+
+def _transitorio(e: Exception) -> bool:
+    import openai
+    if isinstance(e, openai.APIConnectionError):  # inclui APITimeoutError
+        return True
+    return getattr(e, "status_code", None) in STATUS_TRANSITORIOS
 
 
 @dataclass
@@ -42,22 +58,56 @@ def _limpar_texto(texto: str | None) -> str | None:
 
 
 class ProvedorOpenAI:
-    """Qualquer API compatível com OpenAI: OpenAI, Ollama, Gemini, Groq, OpenRouter..."""
+    """Qualquer API compatível com OpenAI: OpenAI, Ollama, Gemini, Groq, OpenRouter...
 
-    def __init__(self, modelo: str, base_url: str | None = None, api_key: str | None = None):
-        from openai import OpenAI
+    Resiliência: com `reservas`, uma falha transitória do modelo principal (503, 429,
+    timeout) faz a MESMA chamada ir para o próximo modelo da lista. O modelo que falhou
+    fica em quarentena por QUARENTENA_S (um "circuit breaker" simples), para as próximas
+    mensagens não pagarem o timeout de novo enquanto ele está fora do ar.
+    """
+
+    def __init__(self, modelo: str, base_url: str | None = None, api_key: str | None = None,
+                 reservas: list[str] | None = None, timeout: float = 60, cliente=None,
+                 relogio=time.monotonic):
+        self.modelos = [modelo] + [m for m in (reservas or []) if m and m != modelo]
         self.modelo = modelo
-        self.cliente = OpenAI(base_url=base_url or None, api_key=api_key or "nao-precisa")
+        if cliente is None:
+            from openai import OpenAI
+            # Com reservas, o fallback É a nova tentativa: retry no mesmo modelo só atrasaria.
+            cliente = OpenAI(base_url=base_url or None, api_key=api_key or "nao-precisa",
+                             timeout=timeout, max_retries=0 if reservas else 2)
+        self.cliente = cliente
+        self._relogio = relogio
+        self._fora_ate: dict[str, float] = {}
 
     def responder(self, system: str, mensagens: list[dict], tools: list[Tool]) -> RespostaLLM:
         msgs = [{"role": "system", "content": system}] + [self._converter(m) for m in mensagens]
-        r = self.cliente.chat.completions.create(
-            model=self.modelo,
-            messages=msgs,
-            tools=[{"type": "function",
-                    "function": {"name": t.nome, "description": t.descricao, "parameters": t.parametros}}
-                   for t in tools],
-        )
+        tools_api = [{"type": "function",
+                      "function": {"name": t.nome, "description": t.descricao, "parameters": t.parametros}}
+                     for t in tools]
+
+        agora = self._relogio()
+        # Se todos estiverem em quarentena, tenta todos assim mesmo (melhor que desistir).
+        candidatos = [m for m in self.modelos if self._fora_ate.get(m, 0) <= agora] or self.modelos
+        ultimo_erro: Exception | None = None
+        for modelo in candidatos:
+            try:
+                r = self.cliente.chat.completions.create(model=modelo, messages=msgs, tools=tools_api)
+            except Exception as e:
+                if not _transitorio(e) or len(self.modelos) == 1:
+                    raise
+                log.warning("Modelo %s indisponível (%s); quarentena de %ss",
+                            modelo, getattr(e, "status_code", type(e).__name__), QUARENTENA_S)
+                self._fora_ate[modelo] = self._relogio() + QUARENTENA_S
+                ultimo_erro = e
+                continue
+            if modelo != self.modelo:
+                log.info("Resposta do modelo reserva %s", modelo)
+            return self._ler(r)
+        raise ultimo_erro
+
+    @staticmethod
+    def _ler(r) -> RespostaLLM:
         msg = r.choices[0].message
         chamadas = []
         for tc in msg.tool_calls or []:
@@ -142,8 +192,10 @@ def criar_llm():
     if provedor == "openai":
         if not modelo:
             raise ValueError("Defina LLM_MODELO no .env")
+        reservas = [m.strip() for m in os.getenv("LLM_MODELOS_RESERVA", "").split(",") if m.strip()]
         return ProvedorOpenAI(modelo, base_url=os.getenv("OPENAI_BASE_URL"),
-                              api_key=os.getenv("OPENAI_API_KEY"))
+                              api_key=os.getenv("OPENAI_API_KEY"), reservas=reservas,
+                              timeout=float(os.getenv("LLM_TIMEOUT_S", "60")))
     if provedor == "anthropic":
         return ProvedorAnthropic(modelo or "claude-haiku-5-5", api_key=os.getenv("ANTHROPIC_API_KEY"))
     raise ValueError(f"LLM_PROVEDOR desconhecido: {provedor}")

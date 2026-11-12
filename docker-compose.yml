@@ -31,15 +31,39 @@ services:
       # URL pública que o n8n informa ao Telegram ao registrar o webhook.
       # Vem do .env (interpolação do compose); no dia 2 vira a URL do cloudflared.
       WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      N8N_PROXY_HOPS: "1"                # há um proxy (nginx) na frente dos webhooks
       N8N_DIAGNOSTICS_ENABLED: "false"
     volumes:
       - n8n_data:/home/node/.n8n         # workflows, credenciais e chave de criptografia
+      - ./n8n/workflows:/workflows:ro    # workflows versionados no Git (scripts/importar_n8n.ps1)
     ports:
       - "127.0.0.1:5678:5678"
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+  # ---------- Túnel público (só com: docker compose --profile tunel ...) ----------
+  # Use scripts/tunel.ps1: ele sobe o túnel, descobre a URL e atualiza o WEBHOOK_URL.
+
+  webhook-proxy:                         # deixa passar só /webhook/*; o editor fica privado
+    image: nginx:1.31.8-alpine
+    profiles: [tunel]
+    volumes:
+      - ./n8n/proxy-webhook.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - n8n
+    restart: unless-stopped
+
+  cloudflared:                           # quick tunnel: HTTPS grátis, sem conta, URL muda a cada start
+    image: cloudflare/cloudflared:2026.10.7
+    profiles: [tunel]
+    command: tunnel --no-autoupdate --url http://webhook-proxy:80
+    depends_on:
+      - webhook-proxy
+    # Sem restart automático de propósito: um restart silencioso geraria uma URL nova
+    # que o Telegram não conhece. Melhor o túnel cair e o script ser rodado de novo.
+    restart: "no"
 
 volumes:
   api_dados:

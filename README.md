@@ -21,6 +21,32 @@ docker compose up -d --build
 - API: <http://localhost:8000/docs> (Swagger gerado pelo FastAPI)
 - Dentro do compose, o n8n chama a API em `http://api:8000`
 
+### Colocar o bot do Telegram no ar
+
+Uma vez só:
+
+1. No Telegram, fale com o **@BotFather** → `/newbot` → escolha nome e username (terminado em `bot`).
+   Cole o token no `.env` em `TELEGRAM_BOT_TOKEN=` (não versionado).
+2. Abra <http://localhost:5678> e crie a conta de dono do n8n.
+3. `.\scripts\tunel.ps1`: sobe o túnel HTTPS e grava a URL pública em `WEBHOOK_URL`.
+4. `.\scripts\importar_n8n.ps1`: valida o token, cria a credencial, importa os workflows de
+   [n8n/workflows/](n8n/workflows/) e publica o fluxo de atendimento.
+
+Sempre que ligar o PC/Docker: `.\scripts\tunel.ps1` (a URL do quick tunnel muda a cada start;
+o script atualiza o n8n e confere no Telegram, via `getWebhookInfo`, se o webhook aponta para ela).
+
+Editou um workflow na interface? `.\scripts\exportar_n8n.ps1` grava os JSONs em `n8n/workflows/`
+para versionar no Git. O `importar_n8n.ps1` faz o caminho inverso (e **sobrescreve** o que está no n8n).
+
+```
+Telegram ──HTTPS──► cloudflared ──► nginx (só /webhook/*) ──► n8n ──► api:8000
+                                    o editor do n8n NÃO fica exposto: só em localhost:5678
+```
+
+Fluxo **Atendimento Telegram**: mensagem → "digitando…" → `POST /mensagem` → responde (ou fica em
+silêncio se `resposta` for `null`, porque um humano assumiu) → separa `eventos[]` → Switch por `tipo`.
+Mensagem que não é texto recebe um aviso. Falha da API (502/timeout) vira "tive uma instabilidade".
+
 ### API
 
 | Método | Rota | Uso |
@@ -71,6 +97,12 @@ uvicorn api.main:criar_app --factory --reload   # API em http://localhost:8000
 | **Claude** | pago | `LLM_PROVEDOR=anthropic`, `ANTHROPIC_API_KEY=...` |
 | **OpenAI / Groq / OpenRouter** | pago/variável | `LLM_PROVEDOR=openai` + `OPENAI_BASE_URL` e `OPENAI_API_KEY` |
 
+> **Resiliência (Gemini grátis):** com `LLM_MODELOS_RESERVA`, se o modelo principal der 503/429/timeout,
+> a mesma chamada vai para o próximo modelo da lista, e o que falhou fica 2 min em quarentena
+> (circuit breaker), para as próximas mensagens não pagarem o timeout de novo. Erros 400/401/404
+> não acionam o fallback: são bug ou configuração errada, e trocar de modelo só os esconderia.
+> Veja no log: `docker compose logs -f api | Select-String llm`.
+
 > Com 16 GB de RAM, modelos de 7–8B rodam bem no Ollama (mais lentos sem GPU). Modelos locais
 > erram mais nas tools. Compare com um modelo de API: isso faz parte do aprendizado.
 
@@ -114,7 +146,8 @@ No terminal, as linhas cinzas `🔧 ferramenta(args)` mostram o agente "pensando
 - [x] **Fase 1**: agente funcional no terminal
 - [ ] **Fase 2** (em andamento): n8n como orquestrador
   - [x] API FastAPI com `eventos[]`, testes e docker-compose (n8n + API)
-  - [ ] Telegram (BotFather) + túnel cloudflared + fluxo principal no n8n
+  - [x] Telegram (BotFather) + túnel cloudflared + fluxo principal no n8n
+  - [x] Fallback de modelo com quarentena (o Gemini grátis sobrecarrega em horário de pico)
   - [ ] Google Calendar e Sheets por evento + alerta de handoff ao dono
   - [ ] Lembrete D-1 e relatório semanal resumido por LLM
 - [ ] **Fase 3**: WhatsApp (Evolution API ou WhatsApp Cloud API) como canal, trocando só o gatilho no n8n

@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS agendamentos (
     inicio TEXT NOT NULL,            -- ISO: 2026-10-23T14:00
     fim TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'confirmado',
-    criado_em TEXT NOT NULL
+    criado_em TEXT NOT NULL,
+    cancelado_em TEXT
 );
 CREATE TABLE IF NOT EXISTS transferencias (
     id INTEGER PRIMARY KEY,
@@ -47,6 +48,15 @@ class Banco:
         self.conn = sqlite3.connect(caminho, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrar()
+
+    def _migrar(self) -> None:
+        """Migrações aditivas para bancos criados por versões anteriores.
+        (CREATE TABLE IF NOT EXISTS não altera uma tabela que já existe.)"""
+        colunas = {l["name"] for l in self.conn.execute("PRAGMA table_info(agendamentos)")}
+        if "cancelado_em" not in colunas:
+            self.conn.execute("ALTER TABLE agendamentos ADD COLUMN cancelado_em TEXT")
+            self.conn.commit()
 
     # ---------- memória da conversa ----------
 
@@ -147,9 +157,9 @@ class Banco:
     def cancelar_agendamento(self, id_agendamento: int, telefone: str) -> bool:
         # O filtro por telefone impede um cliente de cancelar o horário de outro.
         cur = self.conn.execute(
-            "UPDATE agendamentos SET status = 'cancelado' "
+            "UPDATE agendamentos SET status = 'cancelado', cancelado_em = ? "
             "WHERE id = ? AND telefone = ? AND status = 'confirmado'",
-            (id_agendamento, telefone),
+            (_agora(), id_agendamento, telefone),
         )
         self.conn.commit()
         return cur.rowcount == 1
@@ -168,6 +178,29 @@ class Banco:
             "SELECT 1 FROM transferencias WHERE telefone = ? AND resolvido = 0", (telefone,)
         ).fetchone()
         return linha is not None
+
+    # ---------- métricas (para o relatório semanal) ----------
+
+    def metricas_desde(self, desde: str) -> dict:
+        """Números do período calculados em SQL. O relatório usa estes valores; o LLM
+        só resume o texto das conversas, porque contagem feita por LLM não é confiável."""
+        def um(sql: str) -> int:
+            return self.conn.execute(sql, (desde,)).fetchone()[0]
+
+        servicos = self.conn.execute(
+            "SELECT servico, COUNT(*) AS quantidade FROM agendamentos WHERE criado_em >= ? "
+            "GROUP BY servico ORDER BY quantidade DESC, servico", (desde,),
+        ).fetchall()
+        return {
+            "conversas": um("SELECT COUNT(DISTINCT telefone) FROM mensagens WHERE criado_em >= ?"),
+            "mensagens_de_clientes": um(
+                "SELECT COUNT(*) FROM mensagens WHERE criado_em >= ? "
+                "AND json_extract(mensagem, '$.role') = 'user'"),
+            "agendamentos_criados": um("SELECT COUNT(*) FROM agendamentos WHERE criado_em >= ?"),
+            "agendamentos_cancelados": um("SELECT COUNT(*) FROM agendamentos WHERE cancelado_em >= ?"),
+            "transferencias_humano": um("SELECT COUNT(*) FROM transferencias WHERE criado_em >= ?"),
+            "servicos_agendados": [dict(s) for s in servicos],
+        }
 
     def resolver_transferencias(self, telefone: str) -> None:
         self.conn.execute("UPDATE transferencias SET resolvido = 1 WHERE telefone = ?", (telefone,))

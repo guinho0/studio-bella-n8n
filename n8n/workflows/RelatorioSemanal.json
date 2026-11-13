@@ -1,0 +1,186 @@
+{
+  "id": "RelatorioSemanal",
+  "name": "Relatório semanal (seg 8h)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "nodes": [
+    {
+      "id": "8b3e4c30-0099-4c00-9000-000000000099",
+      "name": "Testar agora",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 500],
+      "parameters": {}
+    },
+    {
+      "id": "8b3e4c30-0001-4c00-9000-000000000001",
+      "name": "Segunda às 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 8 * * 1" }] }
+      }
+    },
+    {
+      "id": "8b3e4c30-0002-4c00-9000-000000000002",
+      "name": "Métricas da semana",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "url": "=http://api:8000/metricas?desde={{ $now.minus({ days: 7 }).startOf('day').toFormat(\"yyyy-MM-dd'T'HH:mm\") }}",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "8b3e4c30-0003-4c00-9000-000000000003",
+      "name": "Conversas da semana",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "url": "=http://api:8000/conversas?desde={{ $('Métricas da semana').first().json.desde }}",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "8b3e4c30-0004-4c00-9000-000000000004",
+      "name": "Monta transcrição",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300],
+      "parameters": {
+        "jsCode": "// Transcrição para o LLM. Os ids dos clientes viram \"Cliente 1, 2...\":\n// o resumo não precisa saber QUEM disse (minimização de dados).\nconst conversas = $('Conversas da semana').first().json.conversas || [];\nconst LIMITE = 30000; // caracteres: protege contexto e cota do modelo\nconst partes = conversas.map((c, i) =>\n  `### Cliente ${i + 1}\\n` +\n  c.mensagens.map(m => `${m.papel === 'user' ? 'Cliente' : 'Assistente'}: ${m.texto}`).join('\\n'));\nlet transcricao = partes.join('\\n\\n');\nif (transcricao.length > LIMITE) {\n  transcricao = '[...conversas mais antigas omitidas...]\\n' + transcricao.slice(-LIMITE);\n}\nreturn [{ json: { transcricao, total_conversas: conversas.length } }];"
+      }
+    },
+    {
+      "id": "8b3e4c30-0005-4c00-9000-000000000005",
+      "name": "Teve conversa?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [880, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "d0000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.total_conversas }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "8b3e4c30-0006-4c00-9000-000000000006",
+      "name": "Resume com IA",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [1100, 200],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "parameters": {
+        "promptType": "define",
+        "text": "=Conversas da semana:\n\n{{ $json.transcricao }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Você analisa conversas de clientes com a assistente virtual do Studio Bella (salão de beleza) e escreve um resumo curto para a dona do salão.\n\nFormato: português do Brasil, texto simples para Telegram (sem markdown, sem asteriscos), no máximo 12 linhas, em três blocos:\n1) Dúvidas frequentes: o que os clientes mais perguntaram.\n2) Oportunidades: pedidos que o salão não atendeu (serviço que não existe, dia ou horário fechado, preço) e uma sugestão prática.\n3) Atenção: reclamações e pedidos de atendente humano, com o motivo.\n\nRegras:\n- NÃO cite números nem contagens: os números oficiais são calculados pelo sistema e enviados à parte.\n- Use só o que está nas conversas; não invente.\n- Não inclua nomes, telefones nem identificadores de clientes.\n- Se um bloco não tiver nada, escreva \"nada relevante\"."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8b3e4c30-0007-4c00-9000-000000000007",
+      "name": "Gemini (lite)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [1100, 420],
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": { "temperature": 0.3 }
+      },
+      "credentials": {
+        "googlePalmApi": { "id": "geminiStudioBe01", "name": "Gemini Studio Bella" }
+      }
+    },
+    {
+      "id": "8b3e4c30-0008-4c00-9000-000000000008",
+      "name": "Envia relatório",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 200],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=📊 Relatório semanal - Studio Bella\nDe {{ DateTime.fromISO($('Métricas da semana').first().json.desde).toFormat('dd/MM') }} até hoje\n\nEm números (calculados pelo sistema):\n• Conversas: {{ $('Métricas da semana').first().json.conversas }} ({{ $('Métricas da semana').first().json.mensagens_de_clientes }} mensagens de clientes)\n• Agendamentos: {{ $('Métricas da semana').first().json.agendamentos_criados }} criados, {{ $('Métricas da semana').first().json.agendamentos_cancelados }} cancelados\n• Pedidos de atendente: {{ $('Métricas da semana').first().json.transferencias_humano }}\n• Serviços agendados: {{ $('Métricas da semana').first().json.servicos_agendados.map(s => s.servico + ' (' + s.quantidade + ')').join(', ') || 'nenhum' }}\n\nO que os clientes disseram (resumo por IA):\n{{ $json.text ? String($json.text).slice(0, 3000) : '(resumo por IA indisponível nesta semana; os números acima continuam valendo)' }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "8b3e4c30-0009-4c00-9000-000000000009",
+      "name": "Semana sem conversas",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1100, 560],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=📊 Relatório semanal - Studio Bella\nDe {{ DateTime.fromISO($('Métricas da semana').first().json.desde).toFormat('dd/MM') }} até hoje\n\nNenhuma conversa com clientes nesta semana.",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    }
+  ],
+  "connections": {
+    "Testar agora": {
+      "main": [[{ "node": "Métricas da semana", "type": "main", "index": 0 }]]
+    },
+    "Segunda às 8h": {
+      "main": [[{ "node": "Métricas da semana", "type": "main", "index": 0 }]]
+    },
+    "Métricas da semana": {
+      "main": [[{ "node": "Conversas da semana", "type": "main", "index": 0 }]]
+    },
+    "Conversas da semana": {
+      "main": [[{ "node": "Monta transcrição", "type": "main", "index": 0 }]]
+    },
+    "Monta transcrição": {
+      "main": [[{ "node": "Teve conversa?", "type": "main", "index": 0 }]]
+    },
+    "Teve conversa?": {
+      "main": [
+        [{ "node": "Resume com IA", "type": "main", "index": 0 }],
+        [{ "node": "Semana sem conversas", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resume com IA": {
+      "main": [[{ "node": "Envia relatório", "type": "main", "index": 0 }]]
+    },
+    "Gemini (lite)": {
+      "ai_languageModel": [[{ "node": "Resume com IA", "type": "ai_languageModel", "index": 0 }]]
+    }
+  },
+  "pinData": {}
+}

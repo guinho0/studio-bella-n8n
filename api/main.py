@@ -106,6 +106,13 @@ def criar_app(agente: Agente | None = None, api_token: str | None = None) -> Fas
             itens = banco.conversas_desde(desde.isoformat(timespec="seconds"))
         return {"desde": desde.isoformat(timespec="seconds"), "conversas": itens}
 
+    @app.get("/metricas", dependencies=protegido)
+    def metricas(desde: datetime = Query(description="AAAA-MM-DD ou AAAA-MM-DDTHH:MM")):
+        """Contagens do período para o relatório semanal (feitas em SQL, não pelo LLM)."""
+        inicio = desde.isoformat(timespec="seconds")
+        with trava:
+            return {"desde": inicio, **banco.metricas_desde(inicio)}
+
     @app.post("/conversas/{telefone}/liberar", dependencies=protegido)
     def liberar(telefone: str):
         """Devolve a conversa ao robô depois de uma transferência para humano."""

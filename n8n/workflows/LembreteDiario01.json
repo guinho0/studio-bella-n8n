@@ -1,0 +1,101 @@
+{
+  "id": "LembreteDiario01",
+  "name": "Lembrete D-1 (18h)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "nodes": [
+    {
+      "id": "7a2d3b20-0099-4b00-9000-000000000099",
+      "name": "Testar agora",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 500],
+      "parameters": {}
+    },
+    {
+      "id": "7a2d3b20-0001-4b00-9000-000000000001",
+      "name": "Todo dia às 18h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 18 * * *" }] }
+      }
+    },
+    {
+      "id": "7a2d3b20-0002-4b00-9000-000000000002",
+      "name": "Agenda de amanhã",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "url": "=http://api:8000/agendamentos?data={{ $now.plus({ days: 1 }).toFormat('yyyy-MM-dd') }}",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "7a2d3b20-0003-4b00-9000-000000000003",
+      "name": "Um por cliente",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "parameters": { "fieldToSplitOut": "agendamentos", "options": {} }
+    },
+    {
+      "id": "7a2d3b20-0004-4b00-9000-000000000004",
+      "name": "Lembra o cliente",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [680, 200],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "chatId": "={{ $json.telefone }}",
+        "text": "=Oi, {{ $json.nome_cliente }}! Passando para lembrar do seu horário amanhã, {{ DateTime.fromISO($json.inicio).setLocale('pt-BR').toFormat(\"cccc (dd/MM)\") }}, às {{ DateTime.fromISO($json.inicio).toFormat('HH:mm') }}: {{ $json.servico }} no Studio Bella. 💇‍♀️\n\nSe precisar remarcar ou cancelar, é só me responder aqui. Até amanhã!",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "7a2d3b20-0005-4b00-9000-000000000005",
+      "name": "Agenda para o dono",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [460, 400],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=📅 Agenda de amanhã, {{ $now.plus({ days: 1 }).setLocale('pt-BR').toFormat(\"cccc (dd/MM)\") }}: {{ $json.agendamentos.length }} horário(s)\n{{ $json.agendamentos.length ? $json.agendamentos.map(a => '• ' + a.inicio.slice(11, 16) + '  ' + a.servico + ' - ' + a.nome_cliente).join('\\n') + '\\n\\nLembrete enviado a cada cliente.' : 'Nenhum agendamento.' }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    }
+  ],
+  "connections": {
+    "Testar agora": {
+      "main": [[{ "node": "Agenda de amanhã", "type": "main", "index": 0 }]]
+    },
+    "Todo dia às 18h": {
+      "main": [[{ "node": "Agenda de amanhã", "type": "main", "index": 0 }]]
+    },
+    "Agenda de amanhã": {
+      "main": [[
+        { "node": "Um por cliente", "type": "main", "index": 0 },
+        { "node": "Agenda para o dono", "type": "main", "index": 0 }
+      ]]
+    },
+    "Um por cliente": {
+      "main": [[{ "node": "Lembra o cliente", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {}
+}

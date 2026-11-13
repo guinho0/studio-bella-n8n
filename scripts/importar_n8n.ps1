@@ -22,28 +22,35 @@ if (-not $token) { throw 'Defina TELEGRAM_BOT_TOKEN no .env (.\scripts\definir_t
 $bot = (Invoke-RestMethod "https://api.telegram.org/bot$token/getMe").result
 Write-Host "Bot encontrado: @$($bot.username)" -ForegroundColor Green
 
-# ---------- 1. Credencial do Telegram ----------
-# O token entra no container por variável de ambiente (-e NOME, sem valor na linha de
-# comando): não aparece em histórico nem no `ps`. O script de shell abaixo NÃO contém
+# ---------- 1. Credenciais com segredo do .env: Telegram e Gemini ----------
+# Os segredos entram no container por variável de ambiente (-e NOME, sem valor na linha
+# de comando): não aparecem em histórico nem no `ps`. O script de shell abaixo NÃO contém
 # segredo; vai por arquivo porque o PowerShell 5.1 prefixa um BOM em todo texto enviado
 # por pipe a programas nativos, e o sh lê esse BOM como parte do primeiro comando.
+# A chave do Gemini é a mesma que a API do agente usa (OPENAI_API_KEY, endpoint compatível).
 $env:TELEGRAM_BOT_TOKEN = $token
+$env:GEMINI_API_KEY = if ((Ler-Env 'OPENAI_BASE_URL') -match 'generativelanguage') { Ler-Env 'OPENAI_API_KEY' } else { '' }
+if (-not $env:GEMINI_API_KEY) { Write-Warning 'Sem chave do Gemini no .env: o relatório semanal sairá só com os números.' }
 $sh = @'
 set -e
 trap 'rm -f /tmp/cred.json' EXIT
 printf '[{"id":"tgStudioBella001","name":"Telegram Studio Bella","type":"telegramApi","data":{"accessToken":"%s","baseUrl":"https://api.telegram.org"}}]' "$TELEGRAM_BOT_TOKEN" > /tmp/cred.json
 n8n import:credentials --input=/tmp/cred.json
+if [ -n "$GEMINI_API_KEY" ]; then
+  printf '[{"id":"geminiStudioBe01","name":"Gemini Studio Bella","type":"googlePalmApi","data":{"apiKey":"%s","host":"https://generativelanguage.googleapis.com"}}]' "$GEMINI_API_KEY" > /tmp/cred.json
+  n8n import:credentials --input=/tmp/cred.json
+fi
 '@
 $arquivo = Join-Path $env:TEMP 'importar_cred.sh'
 [IO.File]::WriteAllText($arquivo, ($sh -replace "`r", ''), (New-Object Text.UTF8Encoding $false))
 docker compose cp $arquivo n8n:/tmp/importar_cred.sh | Out-Null
 Remove-Item $arquivo
-docker compose exec -T -e TELEGRAM_BOT_TOKEN n8n sh /tmp/importar_cred.sh
+docker compose exec -T -e TELEGRAM_BOT_TOKEN -e GEMINI_API_KEY n8n sh /tmp/importar_cred.sh
 $rc = $LASTEXITCODE
-Remove-Item Env:TELEGRAM_BOT_TOKEN
+Remove-Item Env:TELEGRAM_BOT_TOKEN, Env:GEMINI_API_KEY
 # Arquivos copiados com `docker cp` pertencem ao root; o n8n roda sem privilégios.
 docker compose exec -T -u root n8n rm -f /tmp/importar_cred.sh
-if ($rc -ne 0) { throw "Falha ao importar a credencial do Telegram (código $rc)." }
+if ($rc -ne 0) { throw "Falha ao importar as credenciais (código $rc)." }
 
 # ---------- 2. Liga as credenciais aos nós, pelo nome ----------
 # export:credentials SEM --decrypted: os dados saem cifrados; só usamos id, nome e tipo.
@@ -80,11 +87,13 @@ if ($faltando.Count) {
 docker compose exec -T -u root n8n rm -rf /tmp/wf
 docker compose cp "$temp" n8n:/tmp/wf | Out-Null
 Remove-Item $temp -Recurse -Force
-docker compose exec -T n8n sh -c 'n8n import:workflow --separate --input=/tmp/wf && n8n publish:workflow --id=AtendimentoTg001'
+# Publica todos os workflows versionados (o ID de cada um é o nome do arquivo).
+$ids = (Get-ChildItem n8n/workflows/*.json | ForEach-Object { $_.BaseName }) -join ' '
+docker compose exec -T n8n sh -c "n8n import:workflow --separate --input=/tmp/wf && for id in $ids; do n8n publish:workflow --id=`$id || exit 1; done"
 $rc = $LASTEXITCODE
 docker compose exec -T -u root n8n rm -rf /tmp/wf
 if ($rc -ne 0) { throw "Falha ao importar/publicar os workflows (código $rc)." }
-Write-Host 'Workflows importados; "Atendimento Telegram" publicado.' -ForegroundColor Green
+Write-Host "Workflows importados e publicados: $ids" -ForegroundColor Green
 
 # Ao publicar, o n8n registra o webhook no Telegram. Conferimos com o próprio Telegram.
 $url = Ler-Env 'WEBHOOK_URL'

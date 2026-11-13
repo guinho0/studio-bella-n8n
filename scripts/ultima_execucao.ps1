@@ -3,10 +3,11 @@ Mostra as últimas execuções do fluxo de atendimento e, para cada uma, os nós
 e os erros, inclusive os que o "continuar em caso de erro" deixa passar em silêncio.
 Requer N8N_API_KEY no .env (.\scripts\definir_segredo.ps1 N8N_API_KEY).
 
-Uso:  .\scripts\ultima_execucao.ps1          # a última
+Uso:  .\scripts\ultima_execucao.ps1          # a última do atendimento
       .\scripts\ultima_execucao.ps1 -Quantas 3
+      .\scripts\ultima_execucao.ps1 -Fluxo LembreteDiario01   # ou RelatorioSemanal
 #>
-param([int]$Quantas = 1)
+param([int]$Quantas = 1, [string]$Fluxo = 'AtendimentoTg001')
 Set-Location (Split-Path -Parent $PSScriptRoot)
 . "$PSScriptRoot\_comum.ps1"
 
@@ -15,7 +16,7 @@ if (-not $chave) { throw 'Defina N8N_API_KEY: .\scripts\definir_segredo.ps1 N8N_
 $h = @{ 'X-N8N-API-KEY' = $chave }
 $base = 'http://localhost:5678/api/v1/executions'
 
-$lista = (Invoke-RestMethod "$base`?limit=$Quantas&workflowId=AtendimentoTg001" -Headers $h).data
+$lista = (Invoke-RestMethod "$base`?limit=$Quantas&workflowId=$Fluxo" -Headers $h).data
 foreach ($e in $lista) {
     $d = Invoke-RestMethod "$base/$($e.id)?includeData=true" -Headers $h
     $inicio = ([datetime]$e.startedAt).ToLocalTime().ToString('dd/MM HH:mm:ss')

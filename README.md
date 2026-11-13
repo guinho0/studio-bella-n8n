@@ -66,6 +66,21 @@ No n8n, crie as credenciais **`Google Calendar Studio Bella`** e **`Google Sheet
 (o import liga os nós a elas pelo nome). Planilha com a aba `Agendamentos` e o cabeçalho:
 `id_agendamento, status, nome_cliente, servico, inicio, fim, preco, telefone, calendar_evento_id, atualizado_em`.
 
+### Automações agendadas
+
+| Fluxo | Quando | O que faz |
+|---|---|---|
+| **Lembrete D-1** | todo dia, 18h | `GET /agendamentos?data=amanhã` → lembrete a cada cliente no Telegram + agenda do dia seguinte para o dono |
+| **Relatório semanal** | segunda, 8h | `GET /metricas` + `GET /conversas` da semana → nó de IA do n8n (Basic LLM Chain + Gemini) resume dúvidas, oportunidades e pontos de atenção → Telegram do dono |
+
+Os dois têm um gatilho manual **"Testar agora"**: abra o fluxo no n8n e clique em *Execute workflow*.
+Pela CLI: `docker compose exec -e N8N_RUNNERS_BROKER_PORT=5690 n8n n8n execute --id=RelatorioSemanal`.
+
+**No relatório, os números vêm do SQL e o texto vem do LLM.** LLM resume bem, mas conta mal (alucina
+contagens), então ele recebe só as conversas, com os clientes anonimizados ("Cliente 1, 2…"), e é
+proibido de citar números. Se a IA falhar, o relatório sai mesmo assim, só com os números. O resumo usa
+`gemini-3.5-flash-lite`: tarefa simples, modelo menor e mais disponível no plano grátis.
+
 ### API
 
 | Método | Rota | Uso |
@@ -73,6 +88,7 @@ No n8n, crie as credenciais **`Google Calendar Studio Bella`** e **`Google Sheet
 | `POST` | `/mensagem` `{telefone, texto}` | Processa a mensagem. Devolve `{resposta, eventos[]}`. `resposta: null` = conversa com humano, não responder |
 | `GET` | `/agendamentos?data=AAAA-MM-DD[&status=confirmado\|cancelado\|todos]` | Agenda do dia (lembrete D-1) |
 | `GET` | `/conversas?desde=AAAA-MM-DD[THH:MM]` | Conversas agrupadas por cliente, sem detalhes de tool (relatório semanal) |
+| `GET` | `/metricas?desde=AAAA-MM-DD[THH:MM]` | Contagens do período, feitas em SQL (relatório semanal) |
 | `POST` | `/conversas/{telefone}/liberar` | Devolve a conversa ao robô depois de um handoff |
 | `GET` | `/health` | Healthcheck (sem autenticação) |
 
@@ -168,7 +184,7 @@ No terminal, as linhas cinzas `🔧 ferramenta(args)` mostram o agente "pensando
   - [x] Telegram (BotFather) + túnel cloudflared + fluxo principal no n8n
   - [x] Fallback de modelo com quarentena (o Gemini grátis sobrecarrega em horário de pico)
   - [x] Google Calendar e Sheets por evento + alerta de handoff ao dono (com `/responder` e `/liberar`)
-  - [ ] Lembrete D-1 e relatório semanal resumido por LLM
+  - [x] Lembrete D-1 e relatório semanal resumido por LLM
 - [ ] **Fase 3**: WhatsApp (Evolution API ou WhatsApp Cloud API) como canal, trocando só o gatilho no n8n
 - [ ] **Fase 4**: painel web simples para o dono ver agenda, conversas e assumir atendimentos
 - [ ] **Fase 5**: multi-cliente (um `negocio/` por empresa), deploy em VPS e cobrança mensal

@@ -11,7 +11,7 @@
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.2,
-      "position": [0, 300],
+      "position": [-440, 300],
       "webhookId": "3b8e6d2c-5a41-4f6e-9c1d-7e2f0a9b4c11",
       "parameters": {
         "updates": ["message"],
@@ -22,11 +22,240 @@
       }
     },
     {
+      "id": "6f1c2a10-0016-4a00-9000-000000000016",
+      "name": "Comando do dono?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-220, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000021",
+              "leftValue": "={{ String($json.message.chat.id) }}",
+              "rightValue": "={{ String($env.DONO_TELEGRAM_CHAT_ID || '') }}",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "c0000000-0000-4000-8000-000000000022",
+              "leftValue": "={{ String($json.message.text || '').trim().toLowerCase() }}",
+              "rightValue": "^/(liberar|responder)\\b",
+              "operator": { "type": "string", "operation": "regex" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c2a10-0017-4a00-9000-000000000017",
+      "name": "Lê comando",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [0, -200],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a0000000-0000-4000-8000-000000000001",
+              "name": "comando",
+              "value": "={{ $json.message.text.trim().split(/\\s+/)[0].toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "a0000000-0000-4000-8000-000000000002",
+              "name": "telefone",
+              "value": "={{ $json.message.text.trim().split(/\\s+/)[1] || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a0000000-0000-4000-8000-000000000003",
+              "name": "texto",
+              "value": "={{ $json.message.text.trim().replace(/^\\S+(\\s+\\S+)?\\s*/, '') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c2a10-0018-4a00-9000-000000000018",
+      "name": "Qual comando",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [220, -200],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "c0000000-0000-4000-8000-000000000031",
+                    "leftValue": "={{ $json.comando }}",
+                    "rightValue": "/liberar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  },
+                  {
+                    "id": "c0000000-0000-4000-8000-000000000032",
+                    "leftValue": "={{ $json.telefone }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "liberar"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "c0000000-0000-4000-8000-000000000033",
+                    "leftValue": "={{ $json.comando }}",
+                    "rightValue": "/responder",
+                    "operator": { "type": "string", "operation": "equals" }
+                  },
+                  {
+                    "id": "c0000000-0000-4000-8000-000000000034",
+                    "leftValue": "={{ $json.telefone }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+                  },
+                  {
+                    "id": "c0000000-0000-4000-8000-000000000035",
+                    "leftValue": "={{ $json.texto }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "responder"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "uso incorreto" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0019-4a00-9000-000000000019",
+      "name": "Libera no agente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, -340],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8000/conversas/{{ encodeURIComponent($json.telefone) }}/liberar",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "6f1c2a10-0020-4a00-9000-000000000020",
+      "name": "Confirma liberação",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, -400],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=✅ Conversa com {{ $('Lê comando').item.json.telefone }} devolvida ao robô.",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0021-4a00-9000-000000000021",
+      "name": "Falha ao liberar",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, -280],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ Não consegui liberar a conversa com {{ $('Lê comando').item.json.telefone }}. A API do agente está no ar?",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0022-4a00-9000-000000000022",
+      "name": "Envia ao cliente",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [460, -180],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "chatId": "={{ $json.telefone }}",
+        "text": "={{ $json.texto }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0023-4a00-9000-000000000023",
+      "name": "Confirma envio",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, -160],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=✉️ Enviado para {{ $('Lê comando').item.json.telefone }}.",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0024-4a00-9000-000000000024",
+      "name": "Falha ao enviar",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, -40],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ Não consegui enviar para {{ $('Lê comando').item.json.telefone }}. Confira o id (é o número que aparece no alerta).",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0025-4a00-9000-000000000025",
+      "name": "Ajuda ao dono",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [460, 0],
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "Comandos do dono:\n/responder <id do cliente> <mensagem>: envia sua mensagem ao cliente pelo bot\n/liberar <id do cliente>: devolve a conversa ao robô",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
+    },
+    {
       "id": "6f1c2a10-0002-4a00-9000-000000000002",
       "name": "Tem texto?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [220, 300],
+      "position": [0, 400],
       "parameters": {
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
@@ -49,7 +278,7 @@
       "name": "Só leio texto",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [440, 500],
+      "position": [220, 600],
       "parameters": {
         "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
         "text": "Por enquanto eu só consigo ler mensagens de texto. Pode me escrever? 🙂",
@@ -64,7 +293,7 @@
       "name": "Digitando...",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [440, 200],
+      "position": [220, 300],
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "sendChatAction",
@@ -80,7 +309,7 @@
       "name": "Chama agente",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [660, 200],
+      "position": [440, 300],
       "onError": "continueErrorOutput",
       "parameters": {
         "method": "POST",
@@ -96,7 +325,7 @@
       "name": "Tem resposta?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [900, 60],
+      "position": [680, 160],
       "parameters": {
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
@@ -119,7 +348,7 @@
       "name": "Responde cliente",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1120, 40],
+      "position": [920, 100],
       "parameters": {
         "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
         "text": "={{ $json.resposta }}",
@@ -131,18 +360,26 @@
     },
     {
       "id": "6f1c2a10-0008-4a00-9000-000000000008",
-      "name": "Humano assumiu (silêncio)",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1120, 200],
-      "parameters": {}
+      "name": "Repassa ao dono",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [920, 240],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=💬 {{ $('Telegram Trigger').item.json.message.from.first_name || 'Cliente' }} ({{ $('Telegram Trigger').item.json.message.chat.id }}), em atendimento humano:\n{{ $('Telegram Trigger').item.json.message.text }}\n\nResponder: /responder {{ $('Telegram Trigger').item.json.message.chat.id }} sua mensagem\nDevolver ao robô: /liberar {{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
     },
     {
       "id": "6f1c2a10-0009-4a00-9000-000000000009",
       "name": "Avisa instabilidade",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [900, 420],
+      "position": [680, 560],
       "parameters": {
         "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
         "text": "Desculpe, tive uma instabilidade aqui. Pode repetir sua mensagem em alguns instantes?",
@@ -157,7 +394,7 @@
       "name": "Separa eventos",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [900, 260],
+      "position": [680, 400],
       "parameters": {
         "fieldToSplitOut": "eventos",
         "options": {}
@@ -168,7 +405,7 @@
       "name": "Por evento",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [1120, 280],
+      "position": [920, 420],
       "parameters": {
         "rules": {
           "values": [
@@ -227,40 +464,237 @@
     },
     {
       "id": "6f1c2a10-0012-4a00-9000-000000000012",
-      "name": "[dia 3] Calendar + Sheets (criado)",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1380, 160],
-      "parameters": {}
+      "name": "Cria no Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1180, 200],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "calendar": { "__rl": true, "value": "={{ $env.GOOGLE_CALENDAR_ID }}", "mode": "id" },
+        "start": "={{ $json.dados.inicio }}",
+        "end": "={{ $json.dados.fim }}",
+        "additionalFields": {
+          "summary": "={{ $json.dados.servico }} - {{ $json.dados.nome_cliente }}",
+          "description": "=Agendado pelo assistente virtual (n8n).\nCliente no Telegram: {{ $json.dados.telefone }}\nid_agendamento: {{ $json.dados.id_agendamento }}\nValor: R$ {{ $json.dados.preco }}"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "GOOGLE_CALENDAR", "name": "Google Calendar Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0026-4a00-9000-000000000026",
+      "name": "Linha: confirmado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1400, 200],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a0000000-0000-4000-8000-000000000011", "name": "id_agendamento", "value": "={{ $('Por evento').item.json.dados.id_agendamento }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000012", "name": "status", "value": "confirmado", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000013", "name": "nome_cliente", "value": "={{ $('Por evento').item.json.dados.nome_cliente }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000014", "name": "servico", "value": "={{ $('Por evento').item.json.dados.servico }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000015", "name": "inicio", "value": "={{ $('Por evento').item.json.dados.inicio }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000016", "name": "fim", "value": "={{ $('Por evento').item.json.dados.fim }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000017", "name": "preco", "value": "={{ $('Por evento').item.json.dados.preco }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000018", "name": "telefone", "value": "={{ $('Por evento').item.json.dados.telefone }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000019", "name": "calendar_evento_id", "value": "={{ $json.id || '' }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000020", "name": "atualizado_em", "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c2a10-0027-4a00-9000-000000000027",
+      "name": "Planilha: confirmado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1620, 200],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Agendamentos", "mode": "name" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["id_agendamento"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS", "name": "Google Sheets Studio Bella" }
+      }
     },
     {
       "id": "6f1c2a10-0013-4a00-9000-000000000013",
-      "name": "[dia 3] Calendar + Sheets (cancelado)",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1380, 280],
-      "parameters": {}
+      "name": "Busca na planilha",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1180, 420],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Agendamentos", "mode": "name" },
+        "filtersUI": {
+          "values": [
+            { "lookupColumn": "id_agendamento", "lookupValue": "={{ $json.dados.id_agendamento }}" }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS", "name": "Google Sheets Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0028-4a00-9000-000000000028",
+      "name": "Tem evento no Calendar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1400, 420],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000041",
+              "leftValue": "={{ $json.calendar_evento_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c2a10-0029-4a00-9000-000000000029",
+      "name": "Apaga do Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1620, 380],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "delete",
+        "calendar": { "__rl": true, "value": "={{ $env.GOOGLE_CALENDAR_ID }}", "mode": "id" },
+        "eventId": "={{ $json.calendar_evento_id }}",
+        "options": {}
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "GOOGLE_CALENDAR", "name": "Google Calendar Studio Bella" }
+      }
+    },
+    {
+      "id": "6f1c2a10-0030-4a00-9000-000000000030",
+      "name": "Linha: cancelado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1840, 440],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a0000000-0000-4000-8000-000000000031", "name": "id_agendamento", "value": "={{ $('Por evento').item.json.dados.id_agendamento }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000032", "name": "status", "value": "cancelado", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000033", "name": "nome_cliente", "value": "={{ $('Por evento').item.json.dados.nome_cliente }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000034", "name": "servico", "value": "={{ $('Por evento').item.json.dados.servico }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000035", "name": "inicio", "value": "={{ $('Por evento').item.json.dados.inicio }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000036", "name": "fim", "value": "={{ $('Por evento').item.json.dados.fim }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000037", "name": "preco", "value": "={{ $('Busca na planilha').item.json.preco || '' }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000038", "name": "telefone", "value": "={{ $('Por evento').item.json.dados.telefone }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000039", "name": "calendar_evento_id", "value": "={{ $('Busca na planilha').item.json.calendar_evento_id || '' }}", "type": "string" },
+            { "id": "a0000000-0000-4000-8000-000000000040", "name": "atualizado_em", "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c2a10-0031-4a00-9000-000000000031",
+      "name": "Planilha: cancelado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2060, 440],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "={{ $env.GOOGLE_SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Agendamentos", "mode": "name" },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["id_agendamento"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS", "name": "Google Sheets Studio Bella" }
+      }
     },
     {
       "id": "6f1c2a10-0014-4a00-9000-000000000014",
-      "name": "[dia 3] Alerta ao dono",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1380, 400],
-      "parameters": {}
+      "name": "Alerta ao dono",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1180, 620],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "chatId": "={{ $env.DONO_TELEGRAM_CHAT_ID }}",
+        "text": "=🚨 Atendimento humano solicitado\nCliente: {{ $('Telegram Trigger').item.json.message.from.first_name || '' }} (id {{ $json.dados.telefone }})\nMotivo: {{ $json.dados.motivo }}\n\nÚltimas mensagens:\n{{ ($json.dados.ultimas_mensagens || []).map(m => (m.papel === 'user' ? '👤 ' : '🤖 ') + m.texto).join('\\n') }}\n\nO robô está em silêncio com esse cliente.\nResponder: /responder {{ $json.dados.telefone }} sua mensagem\nDevolver ao robô: /liberar {{ $json.dados.telefone }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "tgStudioBella001", "name": "Telegram Studio Bella" }
+      }
     },
     {
       "id": "6f1c2a10-0015-4a00-9000-000000000015",
       "name": "Evento desconhecido",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1380, 520],
+      "position": [1180, 800],
       "parameters": {}
     }
   ],
   "connections": {
     "Telegram Trigger": {
-      "main": [[{ "node": "Tem texto?", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Comando do dono?", "type": "main", "index": 0 }]]
+    },
+    "Comando do dono?": {
+      "main": [
+        [{ "node": "Lê comando", "type": "main", "index": 0 }],
+        [{ "node": "Tem texto?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Lê comando": {
+      "main": [[{ "node": "Qual comando", "type": "main", "index": 0 }]]
+    },
+    "Qual comando": {
+      "main": [
+        [{ "node": "Libera no agente", "type": "main", "index": 0 }],
+        [{ "node": "Envia ao cliente", "type": "main", "index": 0 }],
+        [{ "node": "Ajuda ao dono", "type": "main", "index": 0 }]
+      ]
+    },
+    "Libera no agente": {
+      "main": [
+        [{ "node": "Confirma liberação", "type": "main", "index": 0 }],
+        [{ "node": "Falha ao liberar", "type": "main", "index": 0 }]
+      ]
+    },
+    "Envia ao cliente": {
+      "main": [
+        [{ "node": "Confirma envio", "type": "main", "index": 0 }],
+        [{ "node": "Falha ao enviar", "type": "main", "index": 0 }]
+      ]
     },
     "Tem texto?": {
       "main": [
@@ -283,7 +717,7 @@
     "Tem resposta?": {
       "main": [
         [{ "node": "Responde cliente", "type": "main", "index": 0 }],
-        [{ "node": "Humano assumiu (silêncio)", "type": "main", "index": 0 }]
+        [{ "node": "Repassa ao dono", "type": "main", "index": 0 }]
       ]
     },
     "Separa eventos": {
@@ -291,11 +725,32 @@
     },
     "Por evento": {
       "main": [
-        [{ "node": "[dia 3] Calendar + Sheets (criado)", "type": "main", "index": 0 }],
-        [{ "node": "[dia 3] Calendar + Sheets (cancelado)", "type": "main", "index": 0 }],
-        [{ "node": "[dia 3] Alerta ao dono", "type": "main", "index": 0 }],
+        [{ "node": "Cria no Calendar", "type": "main", "index": 0 }],
+        [{ "node": "Busca na planilha", "type": "main", "index": 0 }],
+        [{ "node": "Alerta ao dono", "type": "main", "index": 0 }],
         [{ "node": "Evento desconhecido", "type": "main", "index": 0 }]
       ]
+    },
+    "Cria no Calendar": {
+      "main": [[{ "node": "Linha: confirmado", "type": "main", "index": 0 }]]
+    },
+    "Linha: confirmado": {
+      "main": [[{ "node": "Planilha: confirmado", "type": "main", "index": 0 }]]
+    },
+    "Busca na planilha": {
+      "main": [[{ "node": "Tem evento no Calendar?", "type": "main", "index": 0 }]]
+    },
+    "Tem evento no Calendar?": {
+      "main": [
+        [{ "node": "Apaga do Calendar", "type": "main", "index": 0 }],
+        [{ "node": "Linha: cancelado", "type": "main", "index": 0 }]
+      ]
+    },
+    "Apaga do Calendar": {
+      "main": [[{ "node": "Linha: cancelado", "type": "main", "index": 0 }]]
+    },
+    "Linha: cancelado": {
+      "main": [[{ "node": "Planilha: cancelado", "type": "main", "index": 0 }]]
     }
   },
   "pinData": {}

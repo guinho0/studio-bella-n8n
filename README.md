@@ -43,9 +43,28 @@ Telegram ──HTTPS──► cloudflared ──► nginx (só /webhook/*) ─�
                                     o editor do n8n NÃO fica exposto: só em localhost:5678
 ```
 
-Fluxo **Atendimento Telegram**: mensagem → "digitando…" → `POST /mensagem` → responde (ou fica em
-silêncio se `resposta` for `null`, porque um humano assumiu) → separa `eventos[]` → Switch por `tipo`.
+Fluxo **Atendimento Telegram**: mensagem → "digitando…" → `POST /mensagem` → responde ao cliente
+→ separa `eventos[]` → Switch por `tipo`:
+
+| Evento | Automação no n8n |
+|---|---|
+| `agendamento_criado` | Cria o evento no Google Calendar e grava a linha na planilha (com o id do evento) |
+| `agendamento_cancelado` | Acha a linha pelo `id_agendamento`, apaga o evento do Calendar e marca `cancelado` |
+| `transferido_humano` | Alerta o dono no Telegram com o motivo e as últimas mensagens |
+
 Mensagem que não é texto recebe um aviso. Falha da API (502/timeout) vira "tive uma instabilidade".
+Calendar e Sheets "continuam em caso de erro": uma falha do Google não afeta o atendimento.
+
+**Handoff humano pelo próprio Telegram.** Depois de uma transferência, o robô fica em silêncio com
+aquele cliente, e o que ele escreve é repassado ao dono (`DONO_TELEGRAM_CHAT_ID`). O dono comanda pelo bot:
+- `/responder <id> <mensagem>`: envia a mensagem ao cliente
+- `/liberar <id>`: devolve a conversa ao robô
+
+**Google (uma vez):** projeto no Google Cloud com Calendar, Sheets e Drive API ativadas; cliente
+OAuth "Aplicativo da Web" com redirect `http://localhost:5678/rest/oauth2-credential/callback`.
+No n8n, crie as credenciais **`Google Calendar Studio Bella`** e **`Google Sheets Studio Bella`**
+(o import liga os nós a elas pelo nome). Planilha com a aba `Agendamentos` e o cabeçalho:
+`id_agendamento, status, nome_cliente, servico, inicio, fim, preco, telefone, calendar_evento_id, atualizado_em`.
 
 ### API
 
@@ -148,7 +167,7 @@ No terminal, as linhas cinzas `🔧 ferramenta(args)` mostram o agente "pensando
   - [x] API FastAPI com `eventos[]`, testes e docker-compose (n8n + API)
   - [x] Telegram (BotFather) + túnel cloudflared + fluxo principal no n8n
   - [x] Fallback de modelo com quarentena (o Gemini grátis sobrecarrega em horário de pico)
-  - [ ] Google Calendar e Sheets por evento + alerta de handoff ao dono
+  - [x] Google Calendar e Sheets por evento + alerta de handoff ao dono (com `/responder` e `/liberar`)
   - [ ] Lembrete D-1 e relatório semanal resumido por LLM
 - [ ] **Fase 3**: WhatsApp (Evolution API ou WhatsApp Cloud API) como canal, trocando só o gatilho no n8n
 - [ ] **Fase 4**: painel web simples para o dono ver agenda, conversas e assumir atendimentos

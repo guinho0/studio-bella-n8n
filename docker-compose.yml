@@ -29,10 +29,20 @@ services:
       N8N_HOST: localhost
       N8N_PORT: "5678"
       # URL pública que o n8n informa ao Telegram ao registrar o webhook.
-      # Vem do .env (interpolação do compose); no dia 2 vira a URL do cloudflared.
-      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      # Vem do .env (interpolação do compose), gravada por scripts/tunel.ps1.
+      N8N_WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      # O editor (e o callback do OAuth do Google) fica SEMPRE em localhost: sem isto o n8n
+      # deriva a URL do editor do webhook (túnel), que bloqueia /rest/* e muda a cada start.
+      N8N_EDITOR_BASE_URL: http://localhost:5678/
       N8N_PROXY_HOPS: "1"                # há um proxy (nginx) na frente dos webhooks
       N8N_DIAGNOSTICS_ENABLED: "false"
+      # Configuração dos workflows via $env, para o JSON versionado não ter IDs pessoais.
+      # Liberar $env é aceitável aqui: este container não recebe nenhum segredo por env
+      # (tokens e OAuth ficam cifrados nas credenciais do n8n).
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      DONO_TELEGRAM_CHAT_ID: ${DONO_TELEGRAM_CHAT_ID:-}
+      GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID:-}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}   # formato e-mail; "primary" NÃO é aceito pelo nó
     volumes:
       - n8n_data:/home/node/.n8n         # workflows, credenciais e chave de criptografia
       - ./n8n/workflows:/workflows:ro    # workflows versionados no Git (scripts/importar_n8n.ps1)

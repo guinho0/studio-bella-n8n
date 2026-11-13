@@ -40,13 +40,23 @@ if (-not $token) {
     Write-Warning 'TELEGRAM_BOT_TOKEN vazio no .env: o túnel está no ar, mas não há bot configurado.'
     return
 }
-$info = $null
-for ($i = 0; $i -lt 15; $i++) {
-    $info = (Invoke-RestMethod "https://api.telegram.org/bot$token/getWebhookInfo").result
-    if ($info.url -and $info.url.StartsWith($url)) { break }
-    Start-Sleep -Seconds 2
+function Webhook-Ok {
+    for ($i = 0; $i -lt 15; $i++) {
+        $script:info = (Invoke-RestMethod "https://api.telegram.org/bot$token/getWebhookInfo").result
+        if ($script:info.url -and $script:info.url.StartsWith($url)) { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return $false
 }
-if ($info.url -and $info.url.StartsWith($url)) {
+
+$info = (Invoke-RestMethod "https://api.telegram.org/bot$token/getWebhookInfo").result
+if (-not ($info.url -and $info.url.StartsWith($url))) {
+    # Ao reiniciar, o n8n reativa o fluxo publicado mas NÃO registra o webhook de novo
+    # no Telegram (só faz isso ao publicar). Republicar força o setWebhook com a URL nova.
+    Write-Host 'Registrando a URL nova no Telegram (republicando o fluxo)...'
+    docker compose exec -T n8n sh -c 'n8n unpublish:workflow --id=AtendimentoTg001 >/dev/null 2>&1; n8n publish:workflow --id=AtendimentoTg001 >/dev/null 2>&1'
+}
+if (Webhook-Ok) {
     Write-Host "Webhook do Telegram OK: $($info.url)" -ForegroundColor Green
     Write-Host 'Mande uma mensagem para o bot!'
 } else {

@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import RAIZ
@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS agendamentos (
     status TEXT NOT NULL DEFAULT 'confirmado',
     criado_em TEXT NOT NULL,
     cancelado_em TEXT
+);
+CREATE TABLE IF NOT EXISTS pendencias (   -- ações aguardando confirmação do cliente
+    telefone TEXT NOT NULL,
+    acao TEXT NOT NULL,              -- 'agendar' | 'cancelar'
+    chave TEXT NOT NULL,             -- os dados exatos propostos
+    turno TEXT NOT NULL,             -- em qual mensagem do cliente a proposta foi feita
+    criado_em TEXT NOT NULL,
+    PRIMARY KEY (telefone, acao)
 );
 CREATE TABLE IF NOT EXISTS transferencias (
     id INTEGER PRIMARY KEY,
@@ -178,6 +186,32 @@ class Banco:
             "SELECT 1 FROM transferencias WHERE telefone = ? AND resolvido = 0", (telefone,)
         ).fetchone()
         return linha is not None
+
+    # ---------- confirmação em duas etapas ----------
+
+    def propor(self, telefone: str, acao: str, chave: str, turno: str) -> None:
+        """Registra (ou substitui) a proposta pendente desta ação para o cliente."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pendencias (telefone, acao, chave, turno, criado_em) VALUES (?, ?, ?, ?, ?)",
+            (telefone, acao, chave, turno, _agora()),
+        )
+        self.conn.commit()
+
+    def consumir_confirmacao(self, telefone: str, acao: str, chave: str, turno: str,
+                             validade_min: int = 30) -> bool:
+        """True se existe proposta IGUAL feita num turno ANTERIOR e ainda válida;
+        nesse caso ela é consumida (não vale duas vezes)."""
+        p = self.conn.execute(
+            "SELECT chave, turno, criado_em FROM pendencias WHERE telefone = ? AND acao = ?",
+            (telefone, acao),
+        ).fetchone()
+        if not p or p["chave"] != chave or p["turno"] == turno:
+            return False
+        if datetime.now() - datetime.fromisoformat(p["criado_em"]) > timedelta(minutes=validade_min):
+            return False
+        self.conn.execute("DELETE FROM pendencias WHERE telefone = ? AND acao = ?", (telefone, acao))
+        self.conn.commit()
+        return True
 
     # ---------- métricas (para o relatório semanal) ----------
 

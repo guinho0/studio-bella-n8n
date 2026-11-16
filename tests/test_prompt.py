@@ -14,7 +14,7 @@ def test_calendario_marca_hoje_e_amanha():
     assert p.index("sexta-feira 13/11") < p.index("sexta-feira 20/11")
 
 
-def test_prompt_exige_confirmacao_antes_de_acoes():
+def test_prompt_descreve_confirmacao_em_duas_etapas():
     p = montar_prompt(carregar_negocio(), QUINTA_A_NOITE)
-    assert "ANTES de criar_agendamento ou cancelar_agendamento" in p
+    assert "DUAS etapas" in p and '"pendente"' in p
     assert "PRÓXIMA ocorrência" in p

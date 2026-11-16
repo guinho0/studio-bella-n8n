@@ -4,14 +4,19 @@ from tests.fakes import criar
 
 
 def test_loop_executa_tool_e_devolve_resultado_ao_llm():
+    agendar = {"nome_cliente": "Ana", "servico": "Escova", "data": "2026-10-23", "hora": "15:00"}
     agente, llm, banco = criar([
-        RespostaLLM(None, [ChamadaTool("c1", "criar_agendamento",
-                                       {"nome_cliente": "Ana", "servico": "Escova",
-                                        "data": "2026-10-23", "hora": "15:00"})]),
+        RespostaLLM(None, [ChamadaTool("c1", "criar_agendamento", agendar)]),
+        RespostaLLM("Escova sexta 23/10 às 15h, R$ 60. Posso confirmar?"),
+        RespostaLLM(None, [ChamadaTool("c2", "criar_agendamento", agendar)]),
         RespostaLLM("Prontinho, Ana! Escova amanhã às 15h."),
     ])
-    assert agente.responder("tel1", "quero escova amanhã 15h, sou a Ana") == "Prontinho, Ana! Escova amanhã às 15h."
-    ultima = llm.recebido[1][-1]
+    agente.responder("tel1", "quero escova amanhã 15h, sou a Ana")
+    assert '"pendente": true' in llm.recebido[1][-1]["content"]   # o LLM viu a proposta
+    assert banco.todos_agendamentos() == []
+
+    assert agente.responder("tel1", "sim") == "Prontinho, Ana! Escova amanhã às 15h."
+    ultima = llm.recebido[3][-1]
     assert ultima["role"] == "tool" and '"ok": true' in ultima["content"]
     assert banco.todos_agendamentos()[0]["nome_cliente"] == "Ana"
 

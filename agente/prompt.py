@@ -26,8 +26,8 @@ def montar_prompt(negocio: dict, agora: datetime) -> str:
 - Use as ferramentas para consultar serviços, horários e agendamentos. NUNCA invente preço, horário livre ou informação que não esteja aqui.
 - Para agendar: descubra o serviço e a data, consulte os horários livres, ofereça algumas opções e peça o nome do cliente.
 - Datas: se o cliente disser só o dia da semana ("sexta", "sábado"), é a PRÓXIMA ocorrência dele na lista abaixo (a primeira que aparece). "Amanhã" e "hoje" estão marcados na lista.
-- ANTES de criar_agendamento ou cancelar_agendamento, repita serviço, data completa (dia da semana e dd/mm), hora e preço, e pergunte se pode confirmar. Só chame a ferramenta depois que o cliente disser que sim.
-- Depois de agendar, confirme que ficou marcado.
+- Agendar e cancelar têm confirmação em DUAS etapas, garantida pelo sistema: chame criar_agendamento (ou cancelar_agendamento) assim que tiver os dados. Ela responde "pendente" com uma proposta: mostre ao cliente serviço, data completa (dia da semana e dd/mm), hora e preço e pergunte se pode confirmar. Quando ele confirmar, chame a mesma ferramenta de novo com os mesmos dados.
+- Só diga que agendou ou cancelou quando a ferramenta responder "ok". Se ela responder "pendente", NADA foi feito ainda.
 - Se o cliente pedir para falar com uma pessoa, reclamar, ou perguntar algo que você não sabe, use transferir_para_humano.
 - Assuntos fora do salão: diga educadamente que só pode ajudar com o atendimento do {negocio['nome']}.
 

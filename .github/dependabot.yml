@@ -1,0 +1,15 @@
+# Atualizações de segurança automáticas (PRs semanais).
+version: 2
+updates:
+  - package-ecosystem: pip          # requirements.txt / requirements-dev.txt
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker       # imagem base do Dockerfile da API
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose   # n8n, nginx e cloudflared fixados no compose
+    directory: /
+    schedule:
+      interval: weekly

@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Callable
+from uuid import uuid4
 
 from .banco import Banco
 
@@ -40,9 +41,27 @@ class Contexto:
     negocio: dict
     agora: datetime
     eventos: list[dict] = field(default_factory=list)
+    turno: str = field(default_factory=lambda: uuid4().hex)  # um por mensagem do cliente
 
     def emitir(self, tipo: str, **dados) -> None:
         self.eventos.append({"tipo": tipo, "dados": {"telefone": self.telefone, **dados}})
+
+    def confirmado(self, acao: str, chave: str) -> bool:
+        """Confirmação em duas etapas, garantida em CÓDIGO (não no prompt).
+
+        1ª chamada: só registra a proposta e devolve False (nada é gravado).
+        A ação só acontece se a MESMA proposta foi feita num turno ANTERIOR, ou seja,
+        o cliente já teve a chance de ler e responder. Chamar duas vezes na mesma
+        mensagem não fura a regra, seja por erro do modelo ou por prompt injection.
+        """
+        if self.banco.consumir_confirmacao(self.telefone, acao, chave, self.turno):
+            return True
+        self.banco.propor(self.telefone, acao, chave, self.turno)
+        return False
+
+
+INSTRUCAO_PENDENTE = ("AINDA NÃO FOI FEITO. Mostre estes dados ao cliente e pergunte se pode confirmar. "
+                      "Só se ele confirmar, chame esta ferramenta de novo com exatamente os mesmos dados.")
 
 
 def _json(obj) -> str:
@@ -110,6 +129,12 @@ def criar_tools(ctx: Contexto) -> list[Tool]:
         # Revalida a disponibilidade: o modelo pode ter "inventado" um horário.
         if hora not in _horarios_livres(ctx, inicio.date(), s):
             return _json({"erro": "Horário indisponível. Consulte os horários livres novamente."})
+        nome = nome_cliente.strip()
+        if not ctx.confirmado("agendar", f"{s['nome']}|{data}|{hora}|{nome.lower()}"):
+            return _json({"pendente": True, "instrucao": INSTRUCAO_PENDENTE,
+                          "proposta": {"servico": s["nome"], "nome_cliente": nome, "preco": s["preco"],
+                                       "data": f"{DIAS_SEMANA[inicio.weekday()]} {inicio:%d/%m/%Y}",
+                                       "hora": hora}})
         fim = inicio + timedelta(minutes=s["duracao_min"])
         id_ = ctx.banco.criar_agendamento(ctx.telefone, nome_cliente.strip(), s["nome"], inicio, fim)
         # O evento só é emitido DEPOIS da gravação: se algo falhou acima, não há evento.
@@ -124,13 +149,21 @@ def criar_tools(ctx: Contexto) -> list[Tool]:
 
     def cancelar_agendamento(id_agendamento: int) -> str:
         id_agendamento = int(id_agendamento)
-        if ctx.banco.cancelar_agendamento(id_agendamento, ctx.telefone):
-            a = ctx.banco.buscar_agendamento(id_agendamento)
-            ctx.emitir("agendamento_cancelado", id_agendamento=id_agendamento,
-                       nome_cliente=a["nome_cliente"], servico=a["servico"],
-                       inicio=a["inicio"], fim=a["fim"])
-            return _json({"ok": True})
-        return _json({"erro": "Agendamento não encontrado para este cliente."})
+        a = ctx.banco.buscar_agendamento(id_agendamento)
+        # Mesma resposta para "não existe" e "é de outro cliente": não vaza nada sobre terceiros.
+        if not a or a["telefone"] != ctx.telefone or a["status"] != "confirmado":
+            return _json({"erro": "Agendamento não encontrado para este cliente."})
+        if not ctx.confirmado("cancelar", str(id_agendamento)):
+            inicio = datetime.fromisoformat(a["inicio"])
+            return _json({"pendente": True, "instrucao": INSTRUCAO_PENDENTE,
+                          "proposta": {"cancelar": a["servico"], "nome_cliente": a["nome_cliente"],
+                                       "data": f"{DIAS_SEMANA[inicio.weekday()]} {inicio:%d/%m/%Y}",
+                                       "hora": f"{inicio:%H:%M}"}})
+        ctx.banco.cancelar_agendamento(id_agendamento, ctx.telefone)
+        ctx.emitir("agendamento_cancelado", id_agendamento=id_agendamento,
+                   nome_cliente=a["nome_cliente"], servico=a["servico"],
+                   inicio=a["inicio"], fim=a["fim"])
+        return _json({"ok": True})
 
     def transferir_para_humano(motivo: str) -> str:
         ctx.banco.registrar_transferencia(ctx.telefone, motivo)
@@ -150,7 +183,8 @@ def criar_tools(ctx: Contexto) -> list[Tool]:
               "required": ["data", "servico"]},
              consultar_horarios),
         Tool("criar_agendamento",
-             "Agenda um serviço. Só use depois que o cliente confirmar serviço, data, hora e nome.",
+             "Agenda um serviço, em DUAS etapas: a 1ª chamada só devolve uma proposta 'pendente' para "
+             "o cliente confirmar; depois que ele confirmar, chame de novo com os mesmos dados.",
              {"type": "object",
               "properties": {
                   "nome_cliente": {"type": "string"},
@@ -161,7 +195,9 @@ def criar_tools(ctx: Contexto) -> list[Tool]:
              criar_agendamento),
         Tool("listar_meus_agendamentos", "Lista os próximos agendamentos deste cliente.",
              {"type": "object", "properties": {}}, listar_meus_agendamentos),
-        Tool("cancelar_agendamento", "Cancela um agendamento do cliente pelo id.",
+        Tool("cancelar_agendamento",
+             "Cancela um agendamento do cliente pelo id, em DUAS etapas: a 1ª chamada só devolve uma "
+             "proposta 'pendente' para o cliente confirmar; depois que ele confirmar, chame de novo.",
              {"type": "object",
               "properties": {"id_agendamento": {"type": "integer"}},
               "required": ["id_agendamento"]},

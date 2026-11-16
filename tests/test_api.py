@@ -22,8 +22,10 @@ AGENDAR = RespostaLLM(None, [ChamadaTool("c1", "criar_agendamento",
 # ---------- POST /mensagem ----------
 
 def test_mensagem_devolve_resposta_e_eventos():
-    c, _ = cliente([AGENDAR, RespostaLLM("Agendado, Ana!")])
-    r = c.post("/mensagem", json={"telefone": "5531999990000", "texto": "escova amanhã 15h"})
+    c, _ = cliente([AGENDAR, RespostaLLM("Escova sexta 15h. Confirma?"), AGENDAR, RespostaLLM("Agendado, Ana!")])
+    proposta = c.post("/mensagem", json={"telefone": "5531999990000", "texto": "escova amanhã 15h"})
+    assert proposta.json()["eventos"] == []
+    r = c.post("/mensagem", json={"telefone": "5531999990000", "texto": "sim"})
     assert r.status_code == 200
     corpo = r.json()
     assert corpo["resposta"] == "Agendado, Ana!"

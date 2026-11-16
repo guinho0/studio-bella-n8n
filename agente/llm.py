@@ -79,6 +79,7 @@ class ProvedorOpenAI:
         self.cliente = cliente
         self._relogio = relogio
         self._fora_ate: dict[str, float] = {}
+        self.ultimo_modelo: str | None = None  # quem respondeu a última chamada (útil no eval)
 
     def responder(self, system: str, mensagens: list[dict], tools: list[Tool]) -> RespostaLLM:
         msgs = [{"role": "system", "content": system}] + [self._converter(m) for m in mensagens]
@@ -103,6 +104,7 @@ class ProvedorOpenAI:
                 continue
             if modelo != self.modelo:
                 log.info("Resposta do modelo reserva %s", modelo)
+            self.ultimo_modelo = modelo
             return self._ler(r)
         raise ultimo_erro
 

@@ -57,7 +57,7 @@ services:
   # Use scripts/tunel.ps1: ele sobe o túnel, descobre a URL e atualiza o WEBHOOK_URL.
 
   webhook-proxy:                         # deixa passar só /webhook/*; o editor fica privado
-    image: nginx:1.31.8-alpine
+    image: nginx:1.31.9-alpine
     profiles: [tunel]
     volumes:
       - ./n8n/proxy-webhook.conf:/etc/nginx/conf.d/default.conf:ro
